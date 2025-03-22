@@ -1,15 +1,18 @@
-import { useNavigate } from "react-router-dom";
+import {useNavigate} from 'react-router-dom'
 
-const Home = () => {
-  const navigate = useNavigate();
+export default function Home() {
+  const navigate = useNavigate()
 
   return (
-    <div className="container text-center mt-5">
-      <h2>Real-Time Feedback System</h2>
-      <button className="btn btn-primary m-3" onClick={() => navigate("/create-room")}>Create Room</button>
-      <button className="btn btn-secondary" onClick={() => navigate("/join-room")}>Join Room</button>
-    </div>
-  );
-};
-
-export default Home;
+    <>
+      <div className='relative z-10 space-y-8 text-center'>
+        <h1 className='text-5xl font-bold tracking-wide'>Real-Time Feedback System</h1>
+        <p className='text-lg text-gray-400'>Instant feedback, seamless experience.</p>
+        <div className='flex translate-y-5 justify-center gap-x-6'>
+          <button onClick={() => navigate('/create-room')}>Create Room</button>
+          <button onClick={() => navigate('/join-room')}>Join Room</button>
+        </div>
+      </div>
+    </>
+  )
+}
