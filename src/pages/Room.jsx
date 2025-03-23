@@ -10,106 +10,19 @@ import {
   serverTimestamp,
   updateDoc,
   doc,
-  increment
+  increment,
+  setDoc
 } from 'firebase/firestore'
 import {Pie} from 'react-chartjs-2'
 import {Chart as ChartJS, Title, Tooltip, Legend, ArcElement, CategoryScale} from 'chart.js'
-import {toast} from 'react-toastify'
 
-// Registering Chart.js components
+// Register Chart.js components
 ChartJS.register(Title, Tooltip, Legend, ArcElement, CategoryScale)
 
 // Generate a random username
 const generateUsername = () => {
-  const adjectives = [
-    'Rare',
-    'Lateral',
-    'Curious',
-    'Gentle',
-    'Majestic',
-    'Vibrant',
-    'Mystic',
-    'Silent',
-    'Eccentric',
-    'Mighty',
-    'Bold',
-    'Luminous',
-    'Swift',
-    'Dazzling',
-    'Fierce',
-    'Brave',
-    'Clever',
-    'Enigmatic',
-    'Adventurous',
-    'Dynamic',
-    'Playful',
-    'Intrepid',
-    'Serene',
-    'Whimsical',
-    'Radiant',
-    'Noble',
-    'Graceful',
-    'Mysterious',
-    'Energetic',
-    'Harmonious',
-    'Serene',
-    'Gleaming',
-    'Vivid',
-    'Majestic',
-    'Steady',
-    'Timid',
-    'Hasty',
-    'Shining',
-    'Vast',
-    'Agile',
-    'Ethereal',
-    'Graceful'
-  ]
-
-  const nouns = [
-    'Rabbit',
-    'Moon',
-    'Tiger',
-    'Eagle',
-    'Lion',
-    'Whale',
-    'Phoenix',
-    'Wolf',
-    'Dragon',
-    'Panther',
-    'Leopard',
-    'Jaguar',
-    'Falcon',
-    'Shark',
-    'Bear',
-    'Butterfly',
-    'Kangaroo',
-    'Elephant',
-    'Hawk',
-    'Owl',
-    'Cheetah',
-    'Zebra',
-    'Giraffe',
-    'Horse',
-    'Panda',
-    'Peacock',
-    'Penguin',
-    'Koala',
-    'Cobra',
-    'Vulture',
-    'Alligator',
-    'Otter',
-    'Dolphin',
-    'Swan',
-    'Raven',
-    'Turtle',
-    'Falcon',
-    'Coyote',
-    'Bison',
-    'Gorilla',
-    'Rhino',
-    'Buffalo'
-  ]
+  const adjectives = ['Rare', 'Curious', 'Bold', 'Swift', 'Radiant']
+  const nouns = ['Tiger', 'Eagle', 'Whale', 'Phoenix', 'Wolf']
   return `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`
 }
 
@@ -125,41 +38,52 @@ const Room = () => {
   useEffect(() => {
     if (!roomId) return
 
-    // Check if the user is the room creator
-    const storedCreator = localStorage.getItem('roomCreator')
-    setIsCreator(storedCreator === roomId)
+    setIsCreator(localStorage.getItem('roomCreator') === roomId)
 
-    // Fetch feedbacks for the room
     const feedbacksRef = collection(db, 'feedbacks')
     const feedbackQuery = query(feedbacksRef, where('roomId', '==', roomId))
     const unsubscribeFeedbacks = onSnapshot(feedbackQuery, snapshot => {
       setFeedbacks(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})))
     })
 
-    // Listen to the active users in the room
-    const activeUsersRef = doc(db, 'rooms', roomId)
-    const unsubscribeActiveUsers = onSnapshot(activeUsersRef, doc => {
-      setActiveUsers(doc.data()?.activeUsers || 0) // Fetch the active user count from Firestore
+    const roomRef = doc(db, 'rooms', roomId)
+
+    // Increment active users safely
+    const incrementActiveUserCount = async () => {
+      try {
+        await updateDoc(roomRef, {activeUsers: increment(1)})
+      } catch (error) {
+        console.error('Error incrementing active user count:', error)
+        await setDoc(roomRef, {activeUsers: 1}, {merge: true}) // Ensure room exists
+      }
+    }
+
+    // Decrement active users safely
+    const decrementActiveUserCount = async () => {
+      try {
+        await updateDoc(roomRef, {activeUsers: increment(-1)})
+      } catch (error) {
+        console.error('Error decrementing active user count:', error)
+      }
+    }
+
+    // Subscribe to active user count updates
+    const unsubscribeActiveUsers = onSnapshot(roomRef, doc => {
+      setActiveUsers(doc.data()?.activeUsers || 0)
     })
 
-    // Increment active users when the user enters the room
-    const incrementActiveUserCount = async () => {
-      await updateDoc(activeUsersRef, {
-        activeUsers: increment(1)
-      })
-    }
+    // Increment active users on mount
     incrementActiveUserCount()
 
-    return () => {
-      // Decrement active users when the user leaves the room
-      const decrementActiveUserCount = async () => {
-        await updateDoc(activeUsersRef, {
-          activeUsers: increment(-1)
-        })
-      }
+    // Handle tab close or refresh
+    const handleUnload = () => {
       decrementActiveUserCount()
+    }
+    window.addEventListener('beforeunload', handleUnload)
 
-      // Cleanup on unmount
+    return () => {
+      decrementActiveUserCount()
+      window.removeEventListener('beforeunload', handleUnload)
       unsubscribeFeedbacks()
       unsubscribeActiveUsers()
     }
@@ -167,7 +91,7 @@ const Room = () => {
 
   const submitFeedback = async () => {
     if (rating < 1 || comment.trim() === '') {
-      toast.error('❌ Please provide a rating and a comment.')
+      alert('❌ Please provide a rating and a comment.')
       return
     }
     try {
@@ -180,15 +104,14 @@ const Room = () => {
       })
       setRating(3)
       setComment('')
-      toast.success(`✅ Feedback submitted successfully! (${username})`)
+      alert(`✅ Feedback submitted successfully! (${username})`)
     } catch {
-      toast.error('❌ Error submitting feedback.')
+      alert('❌ Error submitting feedback.')
     }
   }
 
   const getRatingDistribution = () => {
     const ratingCounts = [0, 0, 0, 0, 0]
-
     feedbacks.forEach(fb => {
       if (fb.rating >= 1 && fb.rating <= 5) {
         ratingCounts[fb.rating - 1]++
@@ -199,7 +122,6 @@ const Room = () => {
       labels: ['1⭐', '2⭐', '3⭐', '4⭐', '5⭐'],
       datasets: [
         {
-          label: 'Ratings Distribution',
           data: ratingCounts,
           backgroundColor: ['#ff4d4d', '#ffcc00', '#99cc33', '#3399ff', '#66cc66']
         }
@@ -209,32 +131,29 @@ const Room = () => {
 
   const getSuggestions = () => {
     if (feedbacks.length === 0) return 'No feedback yet.'
-    const averageRating = feedbacks.reduce((sum, fb) => sum + fb.rating, 0) / feedbacks.length
-
-    if (averageRating > 4) return 'Great job! Keep up the good work! 😊'
-    if (averageRating > 3) return 'Good work! A few improvements can make it even better. 👍'
+    const avgRating = feedbacks.reduce((sum, fb) => sum + fb.rating, 0) / feedbacks.length
+    if (avgRating > 4) return 'Great job! Keep up the good work! 😊'
+    if (avgRating > 3) return 'Good work! A few improvements can make it even better. 👍'
     return 'Consider addressing key issues to enhance user experience. 🚀'
   }
 
   return (
-    <div className='mx-auto w-full max-w-4xl rounded-2xl bg-white/10 !p-6 shadow-2xl relative'>
+    <div className='relative mx-auto w-full max-w-4xl rounded-2xl bg-white/10 !p-6 shadow-2xl'>
       <div className='space-y-6'>
         <h2 className='text-center text-2xl font-semibold'>Room: {roomId}</h2>
 
-        {/* Show Active Users if Creator */}
         {isCreator && (
-          <span className='c absolute top-4 right-4 gap-x-4'>
+          <span className='absolute top-4 right-4 flex items-center gap-x-4'>
             <svg
               xmlns='http://www.w3.org/2000/svg'
               viewBox='0 0 640 512'
               className='aspect-square w-6 fill-white'>
               <path d='M96 128a128 128 0 1 1 256 0A128 128 0 1 1 96 128zM0 482.3C0 383.8 79.8 304 178.3 304l91.4 0C368.2 304 448 383.8 448 482.3c0 16.4-13.3 29.7-29.7 29.7L29.7 512C13.3 512 0 498.7 0 482.3zM609.3 512l-137.8 0c5.4-9.4 8.6-20.3 8.6-32l0-8c0-60.7-27.1-115.2-69.8-151.8c2.4-.1 4.7-.2 7.1-.2l61.4 0C567.8 320 640 392.2 640 481.3c0 17-13.8 30.7-30.7 30.7zM432 256c-31 0-59-12.6-79.3-32.9C372.4 196.5 384 163.6 384 128c0-26.8-6.6-52.1-18.3-74.3C384.3 40.1 407.2 32 432 32c61.9 0 112 50.1 112 112s-50.1 112-112 112z' />
             </svg>
-            <p className='font-bold'>Active Users: {activeUsers}</p>
+            <p className='font-bold'>Active Users: {activeUsers - 1}</p>
           </span>
         )}
 
-        {/* Feedback Form */}
         {!isCreator && (
           <>
             <h3 className='text-xl font-semibold'>Give Feedback</h3>
@@ -266,7 +185,6 @@ const Room = () => {
           </>
         )}
 
-        {/* Feedback Display */}
         {isCreator && (
           <>
             <h3 className='text-xl font-semibold'>Feedbacks from Users:</h3>
