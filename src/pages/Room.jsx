@@ -1,180 +1,225 @@
-import {useState, useEffect} from 'react'
-import {useParams} from 'react-router-dom'
-import {db} from '../firebase'
-import {collection, query, where, onSnapshot, addDoc} from 'firebase/firestore'
-import {toast} from 'react-toastify'
+import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import { db } from "../firebase";
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment } from "firebase/firestore";
+import "bootstrap/dist/css/bootstrap.min.css";
+import { Pie } from "react-chartjs-2";
+import { Chart as ChartJS, Title, Tooltip, Legend, ArcElement, CategoryScale } from "chart.js";
+import "../styles/room.css";
 
-const getEmotionFromRating = rating => {
-  switch (rating) {
-    case 1:
-      return 'Angry'
-    case 2:
-      return 'Sad'
-    case 3:
-      return 'Neutral'
-    case 4:
-      return 'Happy'
-    case 5:
-      return 'Excited'
-    default:
-      return 'Neutral'
-  }
-}
+// Registering Chart.js components
+ChartJS.register(Title, Tooltip, Legend, ArcElement, CategoryScale);
 
+// Generate a random username
 const generateUsername = () => {
-  const adjectives = ['Rare', 'Lateral', 'Curious', 'Gentle']
-  const nouns = ['Rabbit', 'Moon', 'Tiger', 'Eagle']
-  return `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`
-}
+  const adjectives = [
+    "Rare", "Lateral", "Curious", "Gentle", "Majestic", "Vibrant", "Mystic", "Silent",
+    "Eccentric", "Mighty", "Bold", "Luminous", "Swift", "Dazzling", "Fierce", "Brave",
+    "Clever", "Enigmatic", "Adventurous", "Dynamic", "Playful", "Intrepid", "Serene",
+    "Whimsical", "Radiant", "Noble", "Graceful", "Mysterious", "Energetic", "Harmonious",
+    "Serene", "Gleaming", "Vivid", "Majestic", "Steady", "Timid", "Hasty", "Shining",
+    "Vast", "Agile", "Ethereal", "Graceful"
+  ];
 
-export default function Room() {
-  const {roomId} = useParams()
-  const [feedbacks, setFeedbacks] = useState([])
-  const [activeUsers, setActiveUsers] = useState(0)
-  const [rating, setRating] = useState(3)
-  const [comment, setComment] = useState('')
-  const [username] = useState(generateUsername())
-  const [isCreator, setIsCreator] = useState(true)
+  const nouns = [
+    "Rabbit", "Moon", "Tiger", "Eagle", "Lion", "Whale", "Phoenix", "Wolf", "Dragon",
+    "Panther", "Leopard", "Jaguar", "Falcon", "Shark", "Bear", "Butterfly", "Kangaroo",
+    "Elephant", "Hawk", "Owl", "Cheetah", "Zebra", "Giraffe", "Horse", "Panda", "Peacock",
+    "Penguin", "Koala", "Cobra", "Vulture", "Alligator", "Otter", "Dolphin", "Swan",
+    "Raven", "Turtle", "Falcon", "Coyote", "Bison", "Gorilla", "Rhino", "Buffalo"
+  ];
+  return ${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]};
+};
+
+const Room = () => {
+  const { roomId } = useParams();
+  const [feedbacks, setFeedbacks] = useState([]);
+  const [activeUsers, setActiveUsers] = useState(0);
+  const [rating, setRating] = useState(3);
+  const [comment, setComment] = useState("");
+  const [username, setUsername] = useState(generateUsername());
+  const [isCreator, setIsCreator] = useState(false);
 
   useEffect(() => {
-    if (!roomId) return
+    if (!roomId) return;
 
-    const storedCreator = localStorage.getItem('roomCreator')
-    setIsCreator(storedCreator === roomId)
+    // Check if the user is the room creator
+    const storedCreator = localStorage.getItem("roomCreator");
+    setIsCreator(storedCreator === roomId);
 
-    const feedbacksRef = collection(db, 'feedbacks')
-    const feedbackQuery = query(feedbacksRef, where('roomId', '==', roomId))
-    const unsubscribeFeedbacks = onSnapshot(feedbackQuery, snapshot => {
-      setFeedbacks(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})))
-    })
+    // Fetch feedbacks for the room
+    const feedbacksRef = collection(db, "feedbacks");
+    const feedbackQuery = query(feedbacksRef, where("roomId", "==", roomId));
+    const unsubscribeFeedbacks = onSnapshot(feedbackQuery, (snapshot) => {
+      setFeedbacks(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    });
 
-    const usersRef = collection(db, 'roomUsers')
-    const usersQuery = query(usersRef, where('roomId', '==', roomId))
-    const unsubscribeUsers = onSnapshot(usersQuery, snapshot => {
-      setActiveUsers(snapshot.docs.length)
-    })
+    // Listen to the active users in the room
+    const activeUsersRef = doc(db, "rooms", roomId);
+    const unsubscribeActiveUsers = onSnapshot(activeUsersRef, (doc) => {
+      setActiveUsers(doc.data()?.activeUsers || 0);  // Fetch the active user count from Firestore
+    });
 
-    const addUserToRoom = async () => {
-      try {
-        await addDoc(usersRef, {roomId, joinedAt: new Date(), username})
-      } catch (error) {
-        toast.error('Error adding user:', error)
-      }
-    }
-
-    addUserToRoom()
+    // Increment active users when the user enters the room
+    const incrementActiveUserCount = async () => {
+      await updateDoc(activeUsersRef, {
+        activeUsers: increment(1),
+      });
+    };
+    incrementActiveUserCount();
 
     return () => {
-      unsubscribeFeedbacks()
-      unsubscribeUsers()
-    }
-  }, [roomId, username])
+      // Decrement active users when the user leaves the room
+      const decrementActiveUserCount = async () => {
+        await updateDoc(activeUsersRef, {
+          activeUsers: increment(-1),
+        });
+      };
+      decrementActiveUserCount();
+
+      // Cleanup on unmount
+      unsubscribeFeedbacks();
+      unsubscribeActiveUsers();
+    };
+  }, [roomId]);
 
   const submitFeedback = async () => {
-    if (rating < 1 || comment.trim() === '') {
-      toast.error('❌ Please provide a rating and a comment.')
-      return
+    if (rating < 1 || comment.trim() === "") {
+      alert("❌ Please provide a rating and a comment.");
+      return;
     }
-
-    const emotion = getEmotionFromRating(rating)
-    const timestamp = new Date()
-
     try {
-      await addDoc(collection(db, 'feedbacks'), {
+      await addDoc(collection(db, "feedbacks"), {
         roomId,
         username,
         rating,
         comment,
-        emotion,
-        timestamp
-      })
-      setRating(4)
-      setComment('')
-      toast.success(`✅ Feedback submitted successfully! (${username})`)
+        timestamp: serverTimestamp(),
+      });
+      setRating(3);
+      setComment("");
+      alert(✅ Feedback submitted successfully! (${username}));
     } catch {
-      toast.error('❌ Error submitting feedback.')
+      alert("❌ Error submitting feedback.");
     }
-  }
+  };
+
+  const getRatingDistribution = () => {
+    const ratingCounts = [0, 0, 0, 0, 0];
+
+    feedbacks.forEach((fb) => {
+      if (fb.rating >= 1 && fb.rating <= 5) {
+        ratingCounts[fb.rating - 1]++;
+      }
+    });
+
+    return {
+      labels: ["1⭐", "2⭐", "3⭐", "4⭐", "5⭐"],
+      datasets: [
+        {
+          label: "Ratings Distribution",
+          data: ratingCounts,
+          backgroundColor: ["#ff4d4d", "#ffcc00", "#99cc33", "#3399ff", "#66cc66"],
+        },
+      ],
+    };
+  };
+
+  const getSuggestions = () => {
+    if (feedbacks.length === 0) return "No feedback yet.";
+    const averageRating =
+      feedbacks.reduce((sum, fb) => sum + fb.rating, 0) / feedbacks.length;
+
+    if (averageRating > 4) return "Great job! Keep up the good work! 😊";
+    if (averageRating > 3) return "Good work! A few improvements can make it even better. 👍";
+    return "Consider addressing key issues to enhance user experience. 🚀";
+  };
 
   return (
-    <>
-      <div className='c w-full max-w-3xl flex-col gap-y-6 rounded-2xl bg-white/10 !p-6 backdrop-blur-lg'>
-        <h2 className='text-center text-2xl'>
-          Room ID <p className='font-bold'>{roomId}</p>
-        </h2>
+    <div className="container">
+      <div className="room-content">
+        <h2 className="text-center">Room: {roomId}</h2>
 
-        {isCreator && (
-          <span className='c absolute top-4 right-4 gap-x-4'>
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              viewBox='0 0 640 512'
-              className='aspect-square w-6 fill-white'>
-              <path d='M96 128a128 128 0 1 1 256 0A128 128 0 1 1 96 128zM0 482.3C0 383.8 79.8 304 178.3 304l91.4 0C368.2 304 448 383.8 448 482.3c0 16.4-13.3 29.7-29.7 29.7L29.7 512C13.3 512 0 498.7 0 482.3zM609.3 512l-137.8 0c5.4-9.4 8.6-20.3 8.6-32l0-8c0-60.7-27.1-115.2-69.8-151.8c2.4-.1 4.7-.2 7.1-.2l61.4 0C567.8 320 640 392.2 640 481.3c0 17-13.8 30.7-30.7 30.7zM432 256c-31 0-59-12.6-79.3-32.9C372.4 196.5 384 163.6 384 128c0-26.8-6.6-52.1-18.3-74.3C384.3 40.1 407.2 32 432 32c61.9 0 112 50.1 112 112s-50.1 112-112 112z' />
-            </svg>
-            <p className='font-bold'>Active Users: {activeUsers}</p>
-          </span>
+        {/* Show Active Users if Creator */}
+        {isCreator && <p className="text-muted">👥 Active Users: {activeUsers}</p>}
+
+        {/* Feedback Form */}
+        {!isCreator && (
+          <>
+            <h3>Give Feedback</h3>
+            <p className="text-muted">Hey <strong>{username}</strong>, your feedback matters! 😊</p>
+            <label className="form-label">Rating: {rating} ⭐</label>
+            <input
+              type="range"
+              className="form-range"
+              min="1"
+              max="5"
+              step="1"
+              value={rating}
+              onChange={(e) => setRating(Number(e.target.value))}
+            />
+            <input
+              type="text"
+              className="form-control my-3"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Your feedback"
+            />
+            <button className="btn btn-primary" style={{ width: "450px" }} onClick={submitFeedback}>
+              Submit Feedback
+            </button>
+          </>
         )}
 
-        {isCreator ? (
+        {/* Feedback Display */}
+        {isCreator && (
           <>
-            <h3 className='mt-6 text-center text-xl font-medium'>Feedbacks from Users</h3>
-
+            <h3>Feedbacks from Users:</h3>
             {feedbacks.length === 0 ? (
-              <p className='mt-2 text-center text-gray-400'>No feedback yet.</p>
+              <p>No feedback yet.</p>
             ) : (
-              <div className='mt-3 grid grid-cols-1 gap-4 p-10 sm:grid-cols-2 lg:grid-cols-3'>
-                {feedbacks.map(fb => (
-                  <div
-                    key={fb.id}
-                    className='w-full rounded-2xl border border-gray-700 bg-white/10 !p-5 shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl'>
-                    <h4 className='text-lg font-semibold'>{fb.username}</h4>
-                    <p className='mt-2 text-sm'>{fb.comment}</p>
-                    <div className='mt-4 flex items-center justify-between text-gray-400'>
-                      <span className='text-sm'>⭐ {fb.rating}</span>
-                      <span>{fb.emotion}</span>
-                    </div>
-                    <span className='text-sm text-gray-400'>
-                      {new Date(fb.timestamp.seconds * 1000).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
+              <div className="table-container">
+                <table className="table table-hover table-bordered mt-3">
+                  <thead className="table-dark">
+                    <tr>
+                      <th>Username</th>
+                      <th>Rating</th>
+                      <th>Comment</th>
+                      <th>Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feedbacks.map((fb) => (
+                      <tr key={fb.id}>
+                        <td>{fb.username}</td>
+                        <td>{fb.rating}⭐</td>
+                        <td>{fb.comment}</td>
+                        <td>
+                          {fb.timestamp?.seconds
+                            ? new Date(fb.timestamp.seconds * 1000).toLocaleString()
+                            : "N/A"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-          </>
-        ) : (
-          <>
-            <h3 className='mt-6 text-center text-2xl font-medium'> Feedback</h3>
-            <p className='mt-1 text-center text-gray-300'>
-              Hey <strong>{username}</strong>, your feedback matters a lot!
-            </p>
 
-            <div className='mt-4 w-1/2 space-y-4'>
-              <div>
-                <label className='block text-gray-300'>Rating: {rating} ⭐</label>
-                <input
-                  type='range'
-                  className='w-full accent-white'
-                  min='1'
-                  max='5'
-                  step='1'
-                  value={rating}
-                  onChange={e => setRating(Number(e.target.value))}
-                />
-              </div>
+            <h4 className="mt-4">Feedback Rating Distribution:</h4>
+            <div className="chart-container">
+              <Pie data={getRatingDistribution()} />
+            </div>
 
-              <span className='c gap-x-2'>
-                <input
-                  type='text'
-                  value={comment}
-                  onChange={e => setComment(e.target.value)}
-                  placeholder='Your feedback'
-                />
-                <button onClick={submitFeedback}>Submit</button>
-              </span>
+            <div className="mt-4">
+              <h5>Suggestions based on Feedback:</h5>
+              <p>{getSuggestions()}</p>
             </div>
           </>
         )}
       </div>
-    </>
-  )
-}
+    </div>
+  );
+};
+
+export default Room;
